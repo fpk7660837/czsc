@@ -24,6 +24,7 @@ jobs:
 
       # Runs a single command using the runners shell
       - name: Merge upstream
+        run: |
           git config --global user.name 'kevinfu'
           git config --global user.email 'fpkfpk123@gmail.com'
           git pull --unshallow 
