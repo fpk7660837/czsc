@@ -40,6 +40,18 @@ from czsc.signals.ta import get_s_macd
 from gm_utils import *
 
 
+os.environ['strategy_id'] = 'c7991760-f389-11eb-b66a-00163e0c87d1'
+os.environ['wx_key'] = '2****96b-****-4f83-818b-2952fe2731c0'
+os.environ['max_all_pos'] = '0.8'
+os.environ['max_sym_pos'] = '0.5'
+os.environ['path_gm_logs'] = 'C:/Users/kevin/gm_logs'
+os.environ['backtest_start_time'] = '2020-01-01 14:30:00'
+os.environ['backtest_end_time'] = '2020-12-31 15:30:00'
+os.environ['backtest_initial_cash'] = '100000000'
+os.environ['backtest_transaction_ratio'] = '1'
+os.environ['backtest_commission_ratio'] = '0.001'
+os.environ['backtest_slippage_ratio'] = '0.0005'
+
 def strategy():
     """股票15分钟策略的交易事件"""
     base_freq = '15分钟'
@@ -132,17 +144,17 @@ def strategy():
 def init(context):
     symbols = [
         'SZSE.300014',
-        'SHSE.600143',
-        'SZSE.002216',
-        'SZSE.300033',
-        'SZSE.000795',
-        'SZSE.002739',
-        'SHSE.600000',
-        'SHSE.600008',
-        'SHSE.600006',
-        'SHSE.600009',
-        'SHSE.600010',
-        'SHSE.600011'
+        # 'SHSE.600143',
+        # 'SZSE.002216',
+        # 'SZSE.300033',
+        # 'SZSE.000795',
+        # 'SZSE.002739',
+        # 'SHSE.600000',
+        # 'SHSE.600008',
+        # 'SHSE.600006',
+        # 'SHSE.600009',
+        # 'SHSE.600010',
+        # 'SHSE.600011'
     ]
     name = strategy.__name__
     base_freq, freqs, states_pos, get_signals, get_events = strategy()
