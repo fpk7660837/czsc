@@ -74,8 +74,9 @@ def get_user_signals(c: CZSC) -> OrderedDict:
     # 倒2，倒数第2笔的缩写，表示第N-1笔
     # 倒3，倒数第3笔的缩写，表示第N-2笔
     # 以此类推
-    for i in range(1, 8):
+    for i in range(1, 3):
         s.update(get_s_three_bi(c, i))
+    s.update(get_s_d0_bi(c))
     return s
 
 
@@ -95,8 +96,10 @@ def test_czsc_update():
     assert len(last_bi.fake_bis) == 11
     assert last_bi.fake_bis[0].direction == last_bi.fake_bis[-1].direction == last_bi.direction
     # 测试自定义信号
-    c = CZSC(bars, max_bi_count=50, get_signals=get_user_signals)
-    assert len(c.signals) == 10
+    c = CZSC(bars, max_bi_count=50, get_signals=get_user_signals, signals_n=20)
+    assert len(c.signals) == 11
+    assert len(c.signals_list) == 20
+    assert c.signals_list[-1] == c.signals
 
     kline = [x.__dict__ for x in c.bars_raw]
     bi = [{'dt': x.fx_a.dt, "bi": x.fx_a.fx} for x in c.bi_list] + \
@@ -105,33 +108,6 @@ def test_czsc_update():
     file_html = "x.html"
     chart.render(file_html)
     os.remove(file_html)
-
-
-def drop_test_czsc_trader():
-    bars = read_1min()
-    kg = KlineGenerator(max_count=3000, freqs=['1分钟', '5分钟', '15分钟', '30分钟', '60分钟', '日线'])
-    for row in tqdm(bars[:-10000], desc='init kg'):
-        kg.update(row)
-
-    events = [
-        Event(name="开多", operate=Operate.LO, factors=[
-            Factor(name="5分钟三买", signals_all=[Signal("5分钟_倒1笔_类买卖点_类三买_任意_任意_0")]),
-        ]),
-
-        Event(name="平多", operate=Operate.LE, factors=[
-            Factor(name="1分钟一卖", signals_all=[Signal("1分钟_倒1笔_类买卖点_类一卖_任意_任意_0")]),
-            Factor(name="5分钟一卖", signals_all=[Signal("5分钟_倒1笔_类买卖点_类一卖_任意_任意_0")]),
-            Factor(name="5分钟二卖", signals_all=[Signal("5分钟_倒1笔_类买卖点_类二卖_任意_任意_0")]),
-            Factor(name="5分钟三卖", signals_all=[Signal("5分钟_倒1笔_类买卖点_类三卖_任意_任意_0")])
-        ]),
-    ]
-    ct = CzscTrader(op_freq=Freq.F5, kg=kg, get_signals=get_default_signals, events=events)
-    assert len(ct.s) == 215
-    for row in bars[-10000:]:
-        op = ct.check_operate(row)
-        print(" : op    : ", op)
-        print(" : cache : ", dict(ct.cache), "\n")
-    assert len(ct.s) == 215
 
 
 def test_get_signals():
