@@ -83,6 +83,8 @@ class TsDataCache:
             kline = pro.ths_daily(ts_code=ts_code, start_date=self.sdt, end_date=self.edt,
                                   fields='ts_code,trade_date,open,close,high,low,vol')
             kline = kline.sort_values('trade_date', ignore_index=True)
+            kline['trade_date'] = pd.to_datetime(kline['trade_date'], format=self.date_fmt)
+            kline['dt'] = kline['trade_date']
 
             for bar_number in (1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377):
                 # 向后看
@@ -166,6 +168,8 @@ class TsDataCache:
                                start_date=start_date_, end_date=self.edt)
             kline = kline.sort_values('trade_date', ignore_index=True)
             kline['trade_date'] = pd.to_datetime(kline['trade_date'], format=self.date_fmt)
+            kline['dt'] = kline['trade_date']
+            kline['avg_price'] = kline['amount'] / kline['vol']
 
             for bar_number in (1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377):
                 # 向后看
@@ -228,6 +232,8 @@ class TsDataCache:
             kline = df_klines.drop_duplicates('trade_time')\
                 .sort_values('trade_time', ascending=True, ignore_index=True)
             kline['trade_time'] = pd.to_datetime(kline['trade_time'], format=dt_fmt)
+            kline['dt'] = kline['trade_time']
+            kline['avg_price'] = kline['amount'] / kline['vol']
 
             # 删除9:30的K线
             kline['keep'] = kline['trade_time'].apply(lambda x: 0 if x.hour == 9 and x.minute == 30 else 1)
@@ -454,8 +460,29 @@ class TsDataCache:
             ntd = trade_dates[i + n]
             return ntd
         else:
-            assert abs(m) > abs(n), "abs(m) 必须大于 abs(n)"
-            ntd_list = trade_dates[i+n: i+m]
+            assert m > n > 0 or m < n < 0, "abs(m) 必须大于 abs(n)"
+            if m > n > 0:
+                ntd_list = trade_dates[i+n: i+m]
+            else:
+                ntd_list = trade_dates[i+m: i+n]
             return ntd_list
+
+    def get_dates_span(self, sdt: str, edt: str, is_open: bool = True) -> List[str]:
+        """获取日期区间列表
+
+        :param sdt: 开始日期
+        :param edt: 结束日期
+        :param is_open: 是否是交易日
+        :return: 日期区间列表
+        """
+        sdt = pd.to_datetime(sdt).strftime("%Y%m%d")
+        edt = pd.to_datetime(edt).strftime("%Y%m%d")
+
+        trade_cal = self.trade_cal()
+        if is_open:
+            trade_cal = trade_cal[trade_cal['is_open'] == 1]
+
+        trade_dates = [x for x in trade_cal['cal_date'] if edt >= x >= sdt]
+        return trade_dates
 
 
