@@ -12,14 +12,13 @@ import czsc
 import traceback
 import pandas as pd
 from gm.api import *
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from collections import OrderedDict
 from typing import List, Callable
-from czsc.traders import CzscAdvancedTrader
+from czsc import CzscAdvancedTrader
+from czsc.data import freq_cn2gm
 from czsc.utils import qywx as wx
-from czsc.utils import x_round
-from czsc.utils.bar_generator import BarGenerator
-from czsc.utils.log import create_logger
+from czsc.utils import x_round, BarGenerator, create_logger
 from czsc.objects import RawBar, Event, Freq, Operate, PositionLong, PositionShort
 
 
@@ -40,9 +39,6 @@ if not os.path.exists(file_token):
 else:
     gm_token = open(file_token, encoding="utf-8").read()
     set_token(gm_token)
-
-freq_gm2cn = {"60s": "1分钟", "300s": "5分钟", "900s": "15分钟", "1800s": "30分钟", "3600s": "60分钟", "1d": "日线"}
-freq_cn2gm = {v: k for k, v in freq_gm2cn.items()}
 
 indices = {
     "上证指数": 'SHSE.000001',
@@ -489,57 +485,6 @@ def report_account_status(context):
                f"持仓市值：{int(cash.market_value)}\n" \
                f"可用资金：{int(cash.available)}\n" \
                f"浮动盈亏：{int(cash.fpnl)}\n" \
-               f"标的数量：{len(positions)}\n" \
-               f"{'*' * 31}\n"
-
-        for p in positions:
-            try:
-                msg += f'标的代码：{p.symbol}\n' \
-                       f"标的名称：{context.stocks.get(p.symbol, '无名')}\n" \
-                       f'持仓数量：{p.volume}\n' \
-                       f'最新价格：{round(p.price, 2)}\n' \
-                       f'持仓成本：{round(p.vwap, 2)}\n' \
-                       f'盈亏比例：{int((p.price - p.vwap) / p.vwap * 10000) / 100}%\n' \
-                       f'持仓市值：{int(p.volume * p.vwap)}\n' \
-                       f'持仓天数：{(context.now - p.created_at).days}\n' \
-                       f"{'*' * 31}\n"
-            except:
-                print(p)
-
-        wx.push_text(msg.strip("\n *"), key=context.wx_key)
-
-
-def report_account_status_v1(context):
-    """报告账户持仓状态"""
-    if context.now.isoweekday() > 5:
-        return
-
-    logger = context.logger
-    latest_dt = context.now.strftime(dt_fmt)
-    account = context.account(account_id=context.account_id)
-    cash = account.cash
-    positions = account.positions()
-
-    logger.info("=" * 30 + f" 账户状态【{latest_dt}】 " + "=" * 30)
-    cash_report = f"净值：{int(cash.nav)}，可用资金：{int(cash.available)}，" \
-                  f"浮动盈亏：{int(cash.fpnl)}，标的数量：{len(positions)}"
-    logger.info(cash_report)
-
-    for p in positions:
-        p_report = f"标的：{p.symbol}，名称：{context.stocks.get(p.symbol, '无名')}，" \
-                   f"数量：{p.volume}，成本：{round(p.vwap, 2)}，方向：{p.side}，" \
-                   f"当前价：{round(p.price, 2)}，成本市值：{int(p.volume * p.vwap)}，" \
-                   f"建仓时间：{p.created_at.strftime(dt_fmt)}"
-        logger.info(p_report)
-
-    # 实盘或仿真，推送账户信息到企业微信
-    if context.mode != MODE_BACKTEST:
-
-        msg = f"股票账户状态报告\n{'*' * 31}\n"
-        msg += f"账户净值：{int(cash.nav)}\n" \
-               f"持仓市值：{int(cash.market_value)}\n" \
-               f"可用资金：{int(cash.available)}\n" \
-               f"浮动盈亏：{int(cash.fpnl)}\n" \
                f"标的数量：{len(positions)}\n"
         wx.push_text(msg.strip("\n *"), key=context.wx_key)
 
@@ -584,7 +529,6 @@ class GmCzscTrader(CzscAdvancedTrader):
                  short_events: List[Event] = None,
                  short_pos: PositionShort = None,
                  max_bi_count: int = 50,
-                 bi_min_len: int = 7,
                  signals_n: int = 0,
                  ):
         super().__init__(
@@ -595,7 +539,6 @@ class GmCzscTrader(CzscAdvancedTrader):
             short_events=short_events,
             short_pos=short_pos,
             max_bi_count=max_bi_count,
-            bi_min_len=bi_min_len,
             signals_n=signals_n,
         )
 
@@ -735,6 +678,7 @@ class GmCzscTrader(CzscAdvancedTrader):
 
 def gm_take_snapshot(gm_symbol, end_dt=None, file_html=None,
                      get_signals: Callable = None,
+                     freqs=('1分钟', '5分钟', '15分钟', '30分钟', '60分钟', '日线', '周线', '月线'),
                      adjust=ADJUST_PREV, max_count=1000):
     """使用掘金的数据对任意标的、任意时刻的状态进行快照
 
@@ -742,6 +686,7 @@ def gm_take_snapshot(gm_symbol, end_dt=None, file_html=None,
     :param end_dt:
     :param file_html:
     :param get_signals:
+    :param freqs:
     :param adjust:
     :param max_count:
     :return:
@@ -749,9 +694,7 @@ def gm_take_snapshot(gm_symbol, end_dt=None, file_html=None,
     if not end_dt:
         end_dt = datetime.now().strftime(dt_fmt)
 
-    bg, data = get_init_bg(gm_symbol, end_dt, base_freq='1分钟',
-                           freqs=['5分钟', '15分钟', '30分钟', '60分钟', '日线', '周线', '月线'],
-                           max_count=max_count, adjust=adjust)
+    bg, data = get_init_bg(gm_symbol, end_dt, base_freq=freqs[0], freqs=freqs[1:], max_count=max_count, adjust=adjust)
     ct = GmCzscTrader(bg, get_signals=get_signals)
     for bar in data:
         ct.update(bar)
@@ -762,6 +705,64 @@ def gm_take_snapshot(gm_symbol, end_dt=None, file_html=None,
     else:
         ct.open_in_browser()
     return ct
+
+
+def trader_tactic_snapshot(symbol, tactic: dict, end_dt=None, file_html=None, adjust=ADJUST_PREV, max_count=1000):
+    """使用掘金的数据对任意标的、任意时刻的状态进行策略快照
+
+    :param symbol: 交易标的
+    :param tactic: 择时交易策略
+    :param end_dt: 结束时间，精确到分钟
+    :param file_html: 结果文件
+    :param adjust: 复权类型
+    :param max_count: 最大K线数量
+    :return: trader
+    """
+    base_freq = tactic['base_freq']
+    freqs = tactic['freqs']
+    get_signals = tactic['get_signals']
+
+    long_states_pos = tactic.get('long_states_pos', None)
+    long_events = tactic.get('long_events', None)
+    long_min_interval = tactic.get('long_min_interval', None)
+
+    short_states_pos = tactic.get('short_states_pos', None)
+    short_events = tactic.get('short_events', None)
+    short_min_interval = tactic.get('short_min_interval', None)
+
+    if not end_dt:
+        end_dt = datetime.now().strftime(dt_fmt)
+
+    if long_states_pos:
+        long_pos = PositionLong(symbol, T0=False,
+                                long_min_interval=long_min_interval,
+                                hold_long_a=long_states_pos['hold_long_a'],
+                                hold_long_b=long_states_pos['hold_long_b'],
+                                hold_long_c=long_states_pos['hold_long_c'])
+    else:
+        long_pos = None
+
+    if short_states_pos:
+        short_pos = PositionShort(symbol, T0=False,
+                                  short_min_interval=short_min_interval,
+                                  hold_short_a=short_states_pos['hold_short_a'],
+                                  hold_short_b=short_states_pos['hold_short_b'],
+                                  hold_short_c=short_states_pos['hold_short_c'])
+    else:
+        short_pos = None
+
+    bg, data = get_init_bg(symbol, end_dt, base_freq=base_freq, freqs=freqs, max_count=max_count, adjust=adjust)
+    trader = GmCzscTrader(bg, get_signals, long_events, long_pos, short_events, short_pos,
+                          signals_n=tactic.get('signals_n', 0))
+    for bar in data:
+        trader.update(bar)
+
+    if file_html:
+        trader.take_snapshot(file_html)
+        print(f'saved into {file_html}')
+    else:
+        trader.open_in_browser()
+    return trader
 
 
 def check_index_status(qywx_key):
@@ -824,29 +825,6 @@ def save_traders(context):
         if context.mode != MODE_BACKTEST:
             file_trader = os.path.join(context.data_path, f'traders/{symbol}.cat')
             dill.dump(trader, open(file_trader, 'wb'))
-
-
-def collect_holds_info(traders: List[GmCzscTrader]):
-    """获取持仓信息"""
-    if len(traders) <= 0:
-        return pd.DataFrame()
-
-    results = []
-    for trader in traders:
-        row = {'symbol': trader.symbol, 'dt': trader.end_dt}
-        if trader.long_pos:
-            row.update({
-                "long_pos": trader.long_pos.pos,
-            })
-
-        if trader.short_pos:
-            row.update({
-                "short_pos": trader.short_pos.pos,
-            })
-
-        results.append(row)
-
-    return pd.DataFrame(results)
 
 
 def init_context_universal(context, name):
@@ -993,16 +971,16 @@ def init_context_schedule(context):
 
     :param context:
     """
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='09:31:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='10:01:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='10:31:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='11:01:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='11:31:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='13:01:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='13:31:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='14:01:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='14:31:00')
-    schedule(schedule_func=report_account_status_v1, date_rule='1d', time_rule='15:01:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='09:31:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='10:01:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='10:31:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='11:01:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='11:31:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='13:01:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='13:31:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='14:01:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='14:31:00')
+    schedule(schedule_func=report_account_status, date_rule='1d', time_rule='15:01:00')
 
     # 以下是 实盘/仿真 模式下的定时任务
     if context.mode != MODE_BACKTEST:
