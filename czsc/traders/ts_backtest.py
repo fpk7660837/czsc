@@ -17,6 +17,7 @@ from .. import envs
 from ..data.ts_cache import TsDataCache
 from ..traders.utils import trader_fast_backtest, freq_cn2ts
 from ..utils import x_round
+from ..objects import cal_break_even_point
 
 
 def read_raw_results(raw_path, trade_dir="long"):
@@ -62,8 +63,7 @@ class TraderPerformance:
 
         self.df_pairs = df_pairs
         # 指定哪些列可以用来进行聚合分析
-        self.agg_columns = ['标的代码', '交易方向', '开仓年', '平仓年', '开仓月', '平仓月',
-                            '开仓周', '平仓周', '开仓日', '平仓日']
+        self.agg_columns = ['标的代码', '交易方向', '平仓年', '平仓月', '平仓周', '平仓日']
 
     @staticmethod
     def get_pairs_statistics(df_pairs: pd.DataFrame):
@@ -86,6 +86,7 @@ class TraderPerformance:
                 "累计盈亏比": 0,
                 "交易得分": 0,
                 "每自然日收益": 0,
+                "盈亏平衡点": 0,
             }
             return info
 
@@ -110,6 +111,7 @@ class TraderPerformance:
             "交易胜率": win_pct,
             "累计盈亏比": gain_loss_rate,
             "交易得分": x_round(gain_loss_rate * win_pct, 4),
+            "盈亏平衡点": x_round(cal_break_even_point(df_pairs['盈亏比例'].to_list()), 4),
         }
 
         info['每自然日收益'] = x_round(info['平均单笔收益'] / info['平均持仓天数'], 2)
@@ -177,10 +179,7 @@ class TsStocksBacktest:
             f.write(inspect.getsource(strategy))
         print(f"strategy saved into {file_strategy}")
 
-        self.dc = dc
-        self.sdt = sdt
-        self.edt = edt
-
+        self.dc, self.sdt, self.edt = dc, sdt, edt
         stocks = self.dc.stock_basic()
         stocks_ = stocks[stocks['list_date'] < '2010-01-01'].ts_code.to_list()
         self.stocks_map = {
@@ -194,6 +193,15 @@ class TsStocksBacktest:
                      '512660.SH', '512400.SH', '512010.SH', '512000.SH', '510900.SH',
                      '510300.SH', '510500.SH', '510050.SH', '159992.SZ', '159985.SZ',
                      '159981.SZ', '159949.SZ', '159915.SZ'],
+        }
+
+        self.asset_map = {
+            "index": "I",
+            "stock": "E",
+            "check": "E",
+            "train": "E",
+            "valid": "E",
+            "etfs": "FD"
         }
 
     def analyze_results(self, step, trade_dir="long"):
@@ -214,6 +222,15 @@ class TsStocksBacktest:
             df_.to_excel(f, sheet_name=f"{col}聚合", index=False)
         f.close()
         print(f"{s_name} - {step} - {trade_dir}: {tp.basic_info}")
+
+    def update_step(self, step: str, ts_codes: list):
+        """更新指定阶段的批量回测标的
+
+        :param step: 阶段名称
+        :param ts_codes: 标的列表
+        :return:
+        """
+        self.stocks_map[step] += ts_codes
 
     def batch_backtest(self, step):
         """批量回测
@@ -236,7 +253,7 @@ class TsStocksBacktest:
         strategy = self.strategy
         raw_path = os.path.join(res_path, f"raw_{step}")
         os.makedirs(raw_path, exist_ok=True)
-        asset = "I" if step == 'index' else "E"
+        asset = self.asset_map[step]
 
         tactic = strategy()
         base_freq = tactic['base_freq']
@@ -338,6 +355,9 @@ class TsStocksBacktest:
             dfs = pd.read_pickle(file_dfs)
 
         results_path = os.path.join(raw_path, 'signals_performance')
+        if os.path.exists(results_path):
+            return
+
         os.makedirs(results_path, exist_ok=True)
         signal_cols = [x for x in dfs.columns if len(x.split("_")) == 3]
         for key in signal_cols:
