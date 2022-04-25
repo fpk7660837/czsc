@@ -29,22 +29,20 @@ def read_raw_results(raw_path, trade_dir="long"):
     """
     assert trade_dir in ['long', 'short']
 
-    ops, pairs, p = [], [], []
+    pairs, p = [], []
     for file in tqdm(os.listdir(raw_path)):
         if len(file) != 14:
             continue
         file = os.path.join(raw_path, file)
         try:
-            ops.append(pd.read_excel(file, sheet_name=f'{trade_dir}_operates'))
             pairs.append(pd.read_excel(file, sheet_name=f'{trade_dir}_pairs'))
             p.append(pd.read_excel(file, sheet_name=f'{trade_dir}_performance'))
         except:
             print(f"read_raw_results: fail on {file}")
 
     df_pairs = pd.concat(pairs, ignore_index=True)
-    df_ops = pd.concat(ops, ignore_index=True)
     df_p = pd.concat(p, ignore_index=True)
-    return df_ops, df_pairs, df_p
+    return df_pairs, df_p
 
 
 class TraderPerformance:
@@ -74,6 +72,8 @@ class TraderPerformance:
         """
         if len(df_pairs) == 0:
             info = {
+                "开始时间": None,
+                "结束时间": None,
                 "交易标的数量": 0,
                 "总体交易次数": 0,
                 "平均持仓天数": 0,
@@ -100,6 +100,9 @@ class TraderPerformance:
         gain_loss_rate = min(x_round(gain / (loss + 0.000001), 2), 5)
 
         info = {
+            "开始时间": df_pairs['开仓时间'].min(),
+            "结束时间": df_pairs['平仓时间'].max(),
+
             "交易标的数量": df_pairs['标的代码'].nunique(),
             "总体交易次数": len(df_pairs),
             "平均持仓天数": x_round(df_pairs['持仓天数'].mean(), 2),
@@ -207,13 +210,10 @@ class TsStocksBacktest:
     def analyze_results(self, step, trade_dir="long"):
         res_path = self.res_path
         raw_path = os.path.join(res_path, f'raw_{step}')
-        df_ops, df_pairs, df_p = read_raw_results(raw_path, trade_dir)
+        df_pairs, df_p = read_raw_results(raw_path, trade_dir)
         s_name = self.strategy.__name__
 
-        df_ops.to_csv(os.path.join(res_path, f"{s_name}_{step}_{trade_dir}_operates.csv"), index=False)
-        df_pairs.to_excel(os.path.join(res_path, f"{s_name}_{step}_{trade_dir}_pairs.xlsx"),
-                          index=False)
-
+        df_pairs.to_excel(os.path.join(res_path, f"{s_name}_{step}_{trade_dir}_pairs.xlsx"), index=False)
         f = pd.ExcelWriter(os.path.join(res_path, f"{s_name}_{step}_{trade_dir}_performance.xlsx"))
         df_p.to_excel(f, sheet_name="评估", index=False)
         tp = TraderPerformance(df_pairs)
