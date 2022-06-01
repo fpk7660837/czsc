@@ -353,6 +353,8 @@ class TsDataCache:
             df = pd.read_feather(file_cache)
         else:
             df = pro.hk_hold(trade_date=trade_date)
+            if df.empty:
+                return df
             df.to_feather(file_cache)
         return df
 
@@ -368,6 +370,8 @@ class TsDataCache:
             df = pd.read_feather(file_cache)
         else:
             df = pro.cctv_news(date=date)
+            if df.empty:
+                return df
             df.to_feather(file_cache)
         return df
 
@@ -387,6 +391,9 @@ class TsDataCache:
             end_date = (trade_date.replace(day=1) + timedelta(days=31)).strftime('%Y%m%d')
             df = pro.index_weight(index_code=index_code, start_date=start_date, end_date=end_date)
             df = df.drop_duplicates('con_code', ignore_index=True)
+            if df.empty:
+                return df
+
             df.to_feather(file_cache)
         return df
 
@@ -402,9 +409,11 @@ class TsDataCache:
 
         if os.path.exists(file_cache):
             df = pd.read_pickle(file_cache)
-        else:
-            df = pro.limit_list(trade_date=trade_date)
-            df.to_pickle(file_cache)
+            if not df.empty:
+                return df
+
+        df = pro.limit_list(trade_date=trade_date)
+        df.to_pickle(file_cache)
         return df
 
     @deprecated(reason='推荐使用 daily_basic_new 替代', version='0.9.0')
@@ -440,10 +449,11 @@ class TsDataCache:
         """
         trade_date = pd.to_datetime(trade_date).strftime("%Y%m%d")
         cache_path = self.api_path_map['daily_basic_new']
-        file_cache = os.path.join(cache_path, f"bak_basic_new_{trade_date}.feather")
+        file_cache = os.path.join(cache_path, f"bak_basic_new_{trade_date}.pkl")
         if os.path.exists(file_cache):
-            df = pd.read_feather(file_cache)
-            return df
+            df = pd.read_pickle(file_cache)
+            if not df.empty:
+                return df
 
         df1 = pro.bak_basic(trade_date=trade_date)
         df2 = pro.daily_basic(trade_date=trade_date)
@@ -454,7 +464,7 @@ class TsDataCache:
                    'holder_num']]
         df = df2.merge(df1, on=['ts_code', 'trade_date'], how='left')
         df['is_st'] = df['name'].str.contains('ST')
-        df.to_feather(file_cache)
+        df.to_pickle(file_cache)
         return df
 
     def get_all_ths_members(self, exchange="A", type_="N"):
@@ -536,6 +546,7 @@ class TsDataCache:
         cache_path = self.api_path_map['stocks_daily_bars']
         file_cache = os.path.join(cache_path, f"stocks_daily_bars_{sdt}_{edt}_{adj}.feather")
         if os.path.exists(file_cache):
+            print(f"stocks_daily_bars :: read cache from {file_cache}")
             df = pd.read_feather(file_cache)
             return df
 
@@ -566,7 +577,8 @@ class TsDataCache:
 
         # 涨跌停判断
         def __is_zdt(row_):
-            if row_['close'] == row_['high']:
+            # 涨停描述：收盘价等于最高价，且当日收益 b1b 大于700BP
+            if row_['close'] == row_['high'] and row_['b1b'] > 700:
                 return 1
             elif row_['close'] == row_['low']:
                 return -1
@@ -590,6 +602,7 @@ class TsDataCache:
         cache_path = self.api_path_map['stocks_daily_basic_new']
         file_cache = os.path.join(cache_path, f"stocks_daily_basic_new_{sdt}_{edt}.feather")
         if os.path.exists(file_cache):
+            print(f"stocks_daily_basic_new :: read cache from {file_cache}")
             df = pd.read_feather(file_cache)
             return df
 
